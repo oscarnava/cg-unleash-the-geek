@@ -12,9 +12,11 @@ def sqr(num)
   num * num
 end
 
-# height: size of the map
-WIDTH, HEIGHT = gets.split(' ').collect(&:to_i)
+WIDTH, HEIGHT = gets.split(' ').collect(&:to_i) # 30 x 15
 INT_TO_ITEM = { -1 => :none, 2 => :radar, 3 => :trap, 4 => :ore }.freeze
+SECTOR_SIZE = 5
+HORZ_SECTORS = WIDTH / SECTOR_SIZE
+VERT_SECTORS = HEIGHT / SECTOR_SIZE
 
 class Position
   attr_reader :row, :col
@@ -29,6 +31,10 @@ class Position
 
   def self.random
     Position.new(rand(HEIGHT), rand(WIDTH))
+  end
+
+  def ==(pos)
+    pos.is_a?(Position) && row == pos.row && col == pos.col
   end
 
   def move(dir)
@@ -70,6 +76,28 @@ class Command
     else
       @act.to_s
     end
+  end
+end
+
+class ScanSectorTask
+  def initialize(num = rand(VERT_SECTORS * HORZ_SECTORS))
+    row = num % VERT_SECTORS
+    col = num % HORZ_SECTORS
+    # @horz = (left * SECTOR_SIZE)...((left + 1) * SECTOR_SIZE)
+    # @vert = (top * SECTOR_SIZE)...((top + 1) * SECTOR_SIZE)
+    @target = Position.new(row * SECTOR_SIZE + rand(SECTOR_SIZE), col * SECTOR_SIZE + rand(SECTOR_SIZE))
+  end
+
+  def next_command(robot)
+    if robot.can_dig? @target
+      Command.new(:DIG, pos: @target).tap { @target = nil }
+    else
+      Command.new(:MOVE, pos: @target)
+    end
+  end
+
+  def finished?
+    @target.nil?
   end
 end
 
@@ -132,7 +160,8 @@ class Entity
 end
 
 class Robot < Entity
-  attr_accessor :item
+  attr_reader :item
+  attr_accessor :task
 
   def initialize(id, col, row, item_id, owner)
     super id
@@ -157,6 +186,12 @@ class Robot < Entity
 
   def enabled?
     !@pos.row.negative?
+  end
+
+  def can_dig?(pos)
+    @pos == pos ||
+      @pos.col == pos.col && (@pos.row - pos.row).abs <= 1 ||
+      @pos.row == pos.row && (@pos.col - pos.col).abs <= 1
   end
 
   def to_s
@@ -193,6 +228,7 @@ class GameState
     @trap_cooldown = 0
     @board = Board.new
     @robots = {}
+    @my_bots = []
     @items = {}
   end
 
@@ -223,6 +259,8 @@ class GameState
         @items[id] = Trap.new(id)
       end
     end
+
+    @my_bots = @robots.map(&:last).select(&:mine?)
   end
 
   def radar_available?
@@ -237,12 +275,26 @@ class GameState
     @robots.first { |bot| bot.enabled? && bot.mine? }
   end
 
+  def assign_tasks
+    @my_bots.each { |bot| bot.task = ScanSectorTask.new if bot.task.nil? }
+  end
+
+  def clear_tasks
+    @my_bots.each { |bot| bot.task = nil if bot.task&.finished? }
+  end
+
   # WAIT|MOVE x y|DIG x y|REQUEST item
   def moves
     warn "Explorer: #{explorer.last}"
     warn @robots.map(&:last)
     warn @items.map(&:last)
-    [Command.random, Command.random, Command.random, Command.random, Command.random]
+
+    clear_tasks
+    assign_tasks
+
+    @my_bots.map { |bot| bot.task.next_command(bot) }
+
+    # [Command.random, Command.random, Command.random, Command.random, Command.random]
   end
 end
 
