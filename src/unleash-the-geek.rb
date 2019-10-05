@@ -5,7 +5,11 @@ STDOUT.sync = true # DO NOT REMOVE
 
 alias org_gets gets
 def gets
-  org_gets.tap { |v| warn v }
+  org_gets # .tap { |v| warn v }
+end
+
+def sqr(num)
+  num * num
 end
 
 # height: size of the map
@@ -17,6 +21,10 @@ class Position
   def initialize(row, col)
     @row = row
     @col = col
+  end
+
+  def distance(pos)
+    Math.sqrt(sqr(row - pos.row) + sqr(col - pos.col))
   end
 
   def move(dir)
@@ -33,24 +41,39 @@ class Position
   end
 end
 
+class Cell
+  attr_reader :ore, :hole
+  attr_reader :pos
+
+  def initialize(pos)
+    @pos = pos
+  end
+
+  def set_values(ore, hole)
+    @ore = ore == '?' ? nil : ore.to_i
+    @hole = hole == '1'
+  end
+end
+
 class Board
   def initialize
-    @cells = Array.new(HEIGHT) { Array.new(2 * WIDTH) }
+    @cells = Array.new(HEIGHT) { |row| Array.new(2 * WIDTH) { |col| Cell.new(Position(row, col)) } }
   end
 
   def ore(pos)
-    (v = @cells[pos.row][2 * pos.col]) == '?' ? nil : v.to_i
+    @cells[pos.row][pos.col].ore
   end
 
   def hole?(pos)
-    @cells[pos.row][2 * pos.col + 1] == '1'
+    @cells[pos.row][pos.col].hole
   end
 
   def read_state
     HEIGHT.times do |row|
       # ore: amount of ore or "?" if unknown
       # hole: 1 if cell has a hole
-      @cells[row] = gets.split(' ')
+      cells = @cells[row].each
+      gets.split(' ').each_slice(2) { |ore, hole| cells.next.set_values(ore, hole) }
     end
   end
 end
@@ -82,6 +105,10 @@ class Robot < Entity
     @pos = pos
     @item = item
     @its_mine = its_mine
+  end
+
+  def disabled?
+    @pos.row.negative?
   end
 end
 
