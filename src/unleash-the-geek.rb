@@ -3,14 +3,13 @@
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
 
-def my_gets
-  v = gets
-  warn v
-  v
+alias org_gets gets
+def gets
+  org_gets.tap { |v| warn v }
 end
 
 # height: size of the map
-WIDTH, HEIGHT = my_gets.split(' ').collect(&:to_i)
+WIDTH, HEIGHT = gets.split(' ').collect(&:to_i)
 INT_TO_ITEM = { -1 => :none, 2 => :radar, 3 => :trap, 4 => :ore }.freeze
 
 class Position
@@ -51,7 +50,7 @@ class Board
     HEIGHT.times do |row|
       # ore: amount of ore or "?" if unknown
       # hole: 1 if cell has a hole
-      @cells[row] = my_gets.split(' ')
+      @cells[row] = gets.split(' ')
     end
   end
 end
@@ -108,19 +107,19 @@ class GameState
 
   def read_state
     # my_score: Amount of ore delivered
-    @score, @enemy_score = my_gets.split(' ').collect(&:to_i)
+    @score, @enemy_score = gets.split(' ').collect(&:to_i)
     @board.read_state
 
     # entity_count: number of entities visible to you
     # radar_cooldown: turns left until a new radar can be requested
     # trap_cooldown: turns left until a new trap can be requested
-    @entity_count, @radar_cooldown, @trap_cooldown = my_gets.split(' ').collect(&:to_i)
+    @entity_count, @radar_cooldown, @trap_cooldown = gets.split(' ').collect(&:to_i)
     @entity_count.times do
       # id: unique id of the entity
       # type: 0 for your robot, 1 for other robot, 2 for radar, 3 for trap
       # y: position of the entity
       # item: if this entity is a robot, the item it is carrying (-1 for NONE, 2 for RADAR, 3 for TRAP, 4 for ORE)
-      Entity.build(* my_gets.split(' ').collect(&:to_i)).tap do |entity|
+      Entity.build(* gets.split(' ').collect(&:to_i)).tap do |entity|
         @entities[entity.id] = entity
       end
     end
