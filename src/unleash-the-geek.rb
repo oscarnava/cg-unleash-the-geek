@@ -80,17 +80,38 @@ class Command
 end
 
 class ScanSectorTask
-  def initialize(num = rand(VERT_SECTORS * HORZ_SECTORS))
+  def initialize(bot, num = rand(VERT_SECTORS * HORZ_SECTORS))
     row = num % VERT_SECTORS
     col = num % HORZ_SECTORS
     # @horz = (left * SECTOR_SIZE)...((left + 1) * SECTOR_SIZE)
     # @vert = (top * SECTOR_SIZE)...((top + 1) * SECTOR_SIZE)
+    @bot = bot
     @target = Position.new(row * SECTOR_SIZE + rand(SECTOR_SIZE), col * SECTOR_SIZE + rand(SECTOR_SIZE))
   end
 
-  def next_command(robot)
-    if robot.can_dig? @target
+  def next_command
+    if @bot.can_dig? @target
       Command.new(:DIG, pos: @target).tap { @target = nil }
+    else
+      Command.new(:MOVE, pos: @target)
+    end
+  end
+
+  def finished?
+    @target.nil?
+  end
+end
+
+class DeliverOreTask
+  def initialize(bot)
+    @bot = bot
+    @target = Position.new(bot.pos.row, 0)
+  end
+
+  def next_command
+    warn "bot: #{@bot}, target: #{@target}"
+    if @bot.pos.col <= 4
+      Command.new(:MOVE, pos: @target).tap { @target = nil }
     else
       Command.new(:MOVE, pos: @target)
     end
@@ -160,7 +181,7 @@ class Entity
 end
 
 class Robot < Entity
-  attr_reader :item
+  attr_reader :pos, :item
   attr_accessor :task
 
   def initialize(id, col, row, item_id, owner)
@@ -188,14 +209,22 @@ class Robot < Entity
     !@pos.row.negative?
   end
 
+  def carrying?
+    @item != :none
+  end
+
   def can_dig?(pos)
     @pos == pos ||
       @pos.col == pos.col && (@pos.row - pos.row).abs <= 1 ||
       @pos.row == pos.row && (@pos.col - pos.col).abs <= 1
   end
 
+  def at_hq?
+    @pos.col.zero?
+  end
+
   def to_s
-    "Robot \##{@id} @ [#{@pos}]" + mine? { enabled? ? " (#{@item || 'None'})" : ' (X)' }.to_s
+    "Robot \##{@id} @ [#{@pos}]" + mine? { enabled? ? " (#{@item})" : ' (X)' }.to_s
   end
 end
 
@@ -276,7 +305,15 @@ class GameState
   end
 
   def assign_tasks
-    @my_bots.each { |bot| bot.task = ScanSectorTask.new if bot.task.nil? }
+    @my_bots.each do |bot|
+      next if bot.task
+
+      bot.task = if bot.carrying?
+                   DeliverOreTask.new(bot)
+                 else
+                   ScanSectorTask.new(bot)
+                 end
+    end
   end
 
   def clear_tasks
@@ -285,14 +322,14 @@ class GameState
 
   # WAIT|MOVE x y|DIG x y|REQUEST item
   def moves
-    warn "Explorer: #{explorer.last}"
-    warn @robots.map(&:last)
-    warn @items.map(&:last)
+    # warn "Explorer: #{explorer.last}"
+    # warn @robots.map(&:last)
+    # warn @items.map(&:last)
 
     clear_tasks
     assign_tasks
 
-    @my_bots.map { |bot| bot.task.next_command(bot) }
+    @my_bots.map { |bot| bot.task.next_command }
 
     # [Command.random, Command.random, Command.random, Command.random, Command.random]
   end
