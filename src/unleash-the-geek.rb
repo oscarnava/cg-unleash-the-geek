@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+# Rank    Position  Total   Points
+# Bronze      981   1,127    13.51
+
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
 
@@ -33,21 +36,8 @@ class Position
     Position.new(rand(HEIGHT), rand(WIDTH))
   end
 
-  def ==(pos)
-    pos.is_a?(Position) && row == pos.row && col == pos.col
-  end
-
-  def move(dir)
-    case dir
-    when :DOWN
-      return Position(row + 1, col) if row < HEIGHT
-    when :UP
-      return Position(row - 1, col) if row.positive?
-    when :RIGHT
-      return Position(row, col + 1) if col < WIDTH
-    when :LEFT
-      return Position(row, col - 1) if col.positive?
-    end
+  def ==(other)
+    other.is_a?(Position) && row == other.row && col == other.col
   end
 
   def to_s
@@ -81,10 +71,8 @@ end
 
 class ScanSectorTask
   def initialize(bot, num = rand(VERT_SECTORS * HORZ_SECTORS))
-    row = num % VERT_SECTORS
+    row = num / HORZ_SECTORS
     col = num % HORZ_SECTORS
-    # @horz = (left * SECTOR_SIZE)...((left + 1) * SECTOR_SIZE)
-    # @vert = (top * SECTOR_SIZE)...((top + 1) * SECTOR_SIZE)
     @bot = bot
     @target = Position.new(row * SECTOR_SIZE + rand(SECTOR_SIZE), col * SECTOR_SIZE + rand(SECTOR_SIZE))
   end
@@ -128,11 +116,21 @@ class Cell
 
   def initialize(pos)
     @pos = pos
+    @ore = nil
+    @hole = nil
   end
 
-  def set_values(ore, hole)
-    @ore = ore == '?' ? nil : ore.to_i
-    @hole = hole == '1'
+  def set_state(ore, hole)
+    @ore = ore.to_i if ore != '?'
+    @hole = :opponent if @hole.nil? && hole == '1'
+  end
+
+  def claim_hole
+    @hole = :player
+  end
+
+  def my_hole?
+    @hole == :player
   end
 
   def distance_to(pos)
@@ -150,7 +148,7 @@ class Board
     @cells[pos.row][pos.col].ore
   end
 
-  def hole?(pos)
+  def hole(pos)
     @cells[pos.row][pos.col].hole
   end
 
@@ -165,7 +163,7 @@ class Board
       cells = @cells[row].each
       gets.split(' ').each_slice(2) do |ore, hole|
         cell = cells.next
-        cell.set_values(ore, hole)
+        cell.set_state(ore, hole)
         @ores << cell if cell.ore
       end
     end
@@ -182,16 +180,19 @@ end
 
 class Robot < Entity
   attr_reader :pos, :item
-  attr_accessor :task
+  attr_writer :task
 
   def initialize(id, col, row, item_id, owner)
     super id
     @pos = Position.new(row, col)
     @item = INT_TO_ITEM[item_id]
     @owner = owner
+    @last_pos = @pos
+    @last_cmd = nil
   end
 
   def update(col, row, item_id)
+    @last_pos = @pos
     @pos = Position.new(row, col)
     @item = INT_TO_ITEM[item_id]
     self
@@ -223,6 +224,14 @@ class Robot < Entity
     @pos.col.zero?
   end
 
+  def finished_task?
+    @task.nil? || @task.finished?
+  end
+
+  def next_command
+    @last_cmd = @task&.next_command
+  end
+
   def to_s
     "Robot \##{@id} @ [#{@pos}]" + mine? { enabled? ? " (#{@item})" : ' (X)' }.to_s
   end
@@ -250,12 +259,12 @@ end
 
 class GameState
   def initialize
+    @board = Board.new
     @score = 0
     @enemy_score = 0
     @entity_count = 0
     @radar_cooldown = 0
     @trap_cooldown = 0
-    @board = Board.new
     @robots = {}
     @my_bots = []
     @items = {}
@@ -306,7 +315,7 @@ class GameState
 
   def assign_tasks
     @my_bots.each do |bot|
-      next if bot.task
+      next unless bot.finished_task?
 
       bot.task = if bot.carrying?
                    DeliverOreTask.new(bot)
@@ -317,7 +326,7 @@ class GameState
   end
 
   def clear_tasks
-    @my_bots.each { |bot| bot.task = nil if bot.task&.finished? }
+    @my_bots.each { |bot| bot.task = nil if bot.finished_task? }
   end
 
   # WAIT|MOVE x y|DIG x y|REQUEST item
@@ -329,9 +338,7 @@ class GameState
     clear_tasks
     assign_tasks
 
-    @my_bots.map { |bot| bot.task.next_command }
-
-    # [Command.random, Command.random, Command.random, Command.random, Command.random]
+    @my_bots.map(&:next_command)
   end
 end
 
