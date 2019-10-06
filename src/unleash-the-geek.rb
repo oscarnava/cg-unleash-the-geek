@@ -53,17 +53,17 @@ class Task
 
   def move_to(target)
     yield if block_given?
-    @gs.move_to target
+    @gs.move_to target, msg: self.class
   end
 
   def dig_at(target)
     yield if block_given?
-    @gs.dig_at target
+    @gs.dig_at target, msg: self.class
   end
 
   def request(item)
     yield if block_given?
-    @gs.request item
+    @gs.request item, msg: self.class
   end
 end
 
@@ -80,6 +80,27 @@ class ScanSectorTask < Task
       @target = Position.new(@top + SECTOR_SIZE / 2, @left + SECTOR_SIZE / 2)
       request :RADAR
     elsif @bot.can_dig? @target
+      dig_at @target do
+        @target = nil
+      end
+    else
+      move_to @target
+    end
+  end
+
+  def finished?
+    @target.nil?
+  end
+end
+
+class MineOreTask < Task
+  def initialize(state, bot, cell)
+    super state, bot
+    @target = cell.pos
+  end
+
+  def next_command
+    if @bot.can_dig? @target
       dig_at @target do
         @target = nil
       end
@@ -138,14 +159,26 @@ class Cell
     @hole == :player
   end
 
+  def contains_ore?
+    @ore&.positive?
+  end
+
+  def decrement_ore
+    @ore -= 1 if contains_ore?
+  end
+
   def distance_to(pos)
     @pos.distance_to(pos)
+  end
+
+  def to_s
+    "[#{@ore}]"
   end
 end
 
 class Board
   def initialize
-    @cells = Array.new(HEIGHT) { |row| Array.new(2 * WIDTH) { |col| Cell.new(Position.new(row, col)) } }
+    @cells = Array.new(HEIGHT) { |row| Array.new(WIDTH) { |col| Cell.new(Position.new(row, col)) } }
     @ores = []
   end
 
@@ -166,6 +199,7 @@ class Board
   end
 
   def read_state
+    @ores = []
     HEIGHT.times do |row|
       # ore: amount of ore or "?" if unknown
       # hole: 1 if cell has a hole
@@ -173,9 +207,17 @@ class Board
       gets.split(' ').each_slice(2) do |ore, hole|
         cell = cells.next
         cell.set_state(ore, hole)
-        @ores << cell if cell.ore
+        @ores << cell if cell.contains_ore?
       end
     end
+  end
+
+  def to_s
+    @cells.map do |row|
+      row.map do |cell|
+        cell&.ore || '?'
+      end.join('.')
+    end.join("\n") + "\n" + @ores.map(&:pos).join(',')
   end
 end
 
@@ -282,9 +324,9 @@ class GameState
     def to_s
       case @act
       when :MOVE, :DIG
-        "#{@act} #{@pos}"
+        "#{@act} #{@pos} #{@msg}"
       when :REQUEST
-        "#{@act} #{@itm}"
+        "#{@act} #{@itm} #{@msg}"
       else
         @act.to_s
       end
@@ -303,23 +345,23 @@ class GameState
     @items = {}
   end
 
-  def move_to(target)
-    Command.new(:MOVE, pos: target)
+  def move_to(target, msg: nil)
+    Command.new(:MOVE, pos: target, msg: msg)
   end
 
-  def dig_at(target)
+  def dig_at(target, msg: nil)
     @board[target].claim_hole
-    Command.new(:DIG, pos: target)
+    Command.new(:DIG, pos: target, msg: msg)
   end
 
-  def request(item)
+  def request(item, msg: nil)
     case item
     when :RADAR
       @radar_cooldown = 5
     when :TRAP
       @trap_cooldown = 5
     end
-    Command.new(:REQUEST, item: item)
+    Command.new(:REQUEST, item: item, msg: msg)
   end
 
   def read_state
@@ -361,8 +403,8 @@ class GameState
     @trap_cooldown.zero?
   end
 
-  def explorer
-    @robots.first { |bot| bot.enabled? && bot.mine? }
+  def nearest_ore(bot)
+    @board.nearest_ore bot.pos
   end
 
   def assign_tasks
@@ -371,6 +413,9 @@ class GameState
 
       bot.task = if bot.carrying?
                    DeliverOreTask.new(self, bot)
+                 elsif !(bot.at_hq? && radar_available?) && (ore_cell = nearest_ore(bot))
+                   ore_cell.decrement_ore
+                   MineOreTask.new(self, bot, ore_cell)
                  else
                    ScanSectorTask.new(self, bot)
                  end
@@ -392,6 +437,10 @@ class GameState
 
     @my_bots.map(&:next_command)
   end
+
+  def to_s
+    @board.to_s
+  end
 end
 
 # game loop
@@ -399,5 +448,6 @@ gs = GameState.new
 
 loop do
   gs.read_state
+  # warn gs
   puts gs.moves
 end
