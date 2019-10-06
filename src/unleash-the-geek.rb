@@ -2,6 +2,7 @@
 
 # Rank    Position  Total   Points
 # Bronze      981   1,127    13.51
+# Bronze      994   1,158    13.90
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -76,7 +77,10 @@ class ScanSectorTask < Task
   end
 
   def next_command
-    if @bot.at_hq? && @gs.radar_available? && !@bot.carrying?
+    if @bot.at_hq? && @gs.can_place_radar? && !@bot.carrying?
+      idx = @gs.available_radar_sector
+      @top = (idx / HORZ_SECTORS) * SECTOR_SIZE
+      @left = (idx % HORZ_SECTORS) * SECTOR_SIZE
       @target = Position.new(@top + SECTOR_SIZE / 2, @left + SECTOR_SIZE / 2)
       request :RADAR
     elsif @bot.can_dig? @target
@@ -121,7 +125,7 @@ class DeliverOreTask < Task
   end
 
   def next_command
-    warn "bot: #{@bot}, target: #{@target}"
+    # warn "bot: #{@bot}, target: #{@target}"
     if @bot.pos.col <= 4
       move_to @target do
         @target = nil
@@ -196,6 +200,12 @@ class Board
 
   def nearest_ore(pos)
     @ores.min_by { |cell| pos.distance_to cell.pos }
+  end
+
+  def decrement_ore(pos)
+    cell = self[pos]
+    cell.decrement_ore
+    @ores.delete(cell) unless cell.contains_ore?
   end
 
   def read_state
@@ -343,6 +353,7 @@ class GameState
     @robots = {}
     @my_bots = []
     @items = {}
+    @avail_radar_sectors = Array.new(VERT_SECTORS * HORZ_SECTORS) { |n| n }
   end
 
   def move_to(target, msg: nil)
@@ -399,6 +410,14 @@ class GameState
     @radar_cooldown.zero?
   end
 
+  def available_radar_sector
+    @avail_radar_sectors.sample.tap { |num| @avail_radar_sectors.delete(num) }
+  end
+
+  def can_place_radar?
+    !@avail_radar_sectors.empty? && radar_available?
+  end
+
   def trap_available?
     @trap_cooldown.zero?
   end
@@ -413,8 +432,8 @@ class GameState
 
       bot.task = if bot.carrying?
                    DeliverOreTask.new(self, bot)
-                 elsif !(bot.at_hq? && radar_available?) && (ore_cell = nearest_ore(bot))
-                   ore_cell.decrement_ore
+                 elsif !(bot.at_hq? && can_place_radar?) && (ore_cell = nearest_ore(bot))
+                   @board.decrement_ore(ore_cell.pos)
                    MineOreTask.new(self, bot, ore_cell)
                  else
                    ScanSectorTask.new(self, bot)
