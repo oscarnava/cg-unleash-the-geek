@@ -45,43 +45,46 @@ class Position
   end
 end
 
-class Command
-  def initialize(action = :WAIT, pos: nil, item: nil, msg: nil)
-    @act = action
-    @pos = pos
-    @itm = item
-    @msg = msg
+class Task
+  def initialize(state, bot)
+    @gs = state
+    @bot = bot
   end
 
-  def self.random
-    Command.new(:DIG, pos: Position.random)
+  def move_to(target)
+    yield if block_given?
+    @gs.move_to target
   end
 
-  def to_s
-    case @act
-    when :MOVE, :DIG
-      "#{@act} #{@pos}"
-    when :REQUEST
-      "#{@act} #{@itm}"
-    else
-      @act.to_s
-    end
+  def dig_at(target)
+    yield if block_given?
+    @gs.dig_at target
+  end
+
+  def request(item)
+    yield if block_given?
+    @gs.request item
   end
 end
 
-class ScanSectorTask
-  def initialize(bot, num = rand(VERT_SECTORS * HORZ_SECTORS))
-    row = num / HORZ_SECTORS
-    col = num % HORZ_SECTORS
-    @bot = bot
-    @target = Position.new(row * SECTOR_SIZE + rand(SECTOR_SIZE), col * SECTOR_SIZE + rand(SECTOR_SIZE))
+class ScanSectorTask < Task
+  def initialize(state, bot, num = rand(VERT_SECTORS * HORZ_SECTORS))
+    super state, bot
+    @top = (num / HORZ_SECTORS) * SECTOR_SIZE
+    @left = (num % HORZ_SECTORS) * SECTOR_SIZE
+    @target = Position.new(@top + rand(SECTOR_SIZE), @left + rand(SECTOR_SIZE))
   end
 
   def next_command
-    if @bot.can_dig? @target
-      Command.new(:DIG, pos: @target).tap { @target = nil }
+    if @bot.at_hq? && @gs.radar_available? && !@bot.carrying?
+      @target = Position.new(@top + SECTOR_SIZE / 2, @left + SECTOR_SIZE / 2)
+      request :RADAR
+    elsif @bot.can_dig? @target
+      dig_at @target do
+        @target = nil
+      end
     else
-      Command.new(:MOVE, pos: @target)
+      move_to @target
     end
   end
 
@@ -90,18 +93,20 @@ class ScanSectorTask
   end
 end
 
-class DeliverOreTask
-  def initialize(bot)
-    @bot = bot
+class DeliverOreTask < Task
+  def initialize(state, bot)
+    super state, bot
     @target = Position.new(bot.pos.row, 0)
   end
 
   def next_command
     warn "bot: #{@bot}, target: #{@target}"
     if @bot.pos.col <= 4
-      Command.new(:MOVE, pos: @target).tap { @target = nil }
+      move_to @target do
+        @target = nil
+      end
     else
-      Command.new(:MOVE, pos: @target)
+      move_to @target
     end
   end
 
@@ -142,6 +147,10 @@ class Board
   def initialize
     @cells = Array.new(HEIGHT) { |row| Array.new(2 * WIDTH) { |col| Cell.new(Position.new(row, col)) } }
     @ores = []
+  end
+
+  def [](pos)
+    @cells[pos.row][pos.col]
   end
 
   def ore(pos)
@@ -258,6 +267,30 @@ class Trap < Entity
 end
 
 class GameState
+  class Command
+    def initialize(action = :WAIT, pos: nil, item: nil, msg: nil)
+      @act = action
+      @pos = pos
+      @itm = item
+      @msg = msg
+    end
+
+    def self.random
+      Command.new(:DIG, pos: Position.random)
+    end
+
+    def to_s
+      case @act
+      when :MOVE, :DIG
+        "#{@act} #{@pos}"
+      when :REQUEST
+        "#{@act} #{@itm}"
+      else
+        @act.to_s
+      end
+    end
+  end
+
   def initialize
     @board = Board.new
     @score = 0
@@ -268,6 +301,25 @@ class GameState
     @robots = {}
     @my_bots = []
     @items = {}
+  end
+
+  def move_to(target)
+    Command.new(:MOVE, pos: target)
+  end
+
+  def dig_at(target)
+    @board[target].claim_hole
+    Command.new(:DIG, pos: target)
+  end
+
+  def request(item)
+    case item
+    when :RADAR
+      @radar_cooldown = 5
+    when :TRAP
+      @trap_cooldown = 5
+    end
+    Command.new(:REQUEST, item: item)
   end
 
   def read_state
@@ -318,9 +370,9 @@ class GameState
       next unless bot.finished_task?
 
       bot.task = if bot.carrying?
-                   DeliverOreTask.new(bot)
+                   DeliverOreTask.new(self, bot)
                  else
-                   ScanSectorTask.new(bot)
+                   ScanSectorTask.new(self, bot)
                  end
     end
   end
