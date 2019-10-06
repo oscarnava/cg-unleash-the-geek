@@ -3,6 +3,7 @@
 # Rank    Position  Total   Points
 # Bronze      981   1,127    13.51
 # Bronze      994   1,158    13.90
+# Bronze      592   1,167    26.85
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -353,7 +354,9 @@ class GameState
     @robots = {}
     @my_bots = []
     @items = {}
-    @avail_radar_sectors = Array.new(VERT_SECTORS * HORZ_SECTORS) { |n| n }
+    @avail_radar_sectors = [8, 9, 10, 6, 7, 11,
+                            2, 3, 14, 15, 4, 5, 16, 17,
+                            0, 12, 1, 13]
   end
 
   def move_to(target, msg: nil)
@@ -411,7 +414,7 @@ class GameState
   end
 
   def available_radar_sector
-    @avail_radar_sectors.sample.tap { |num| @avail_radar_sectors.delete(num) }
+    @avail_radar_sectors.shift
   end
 
   def can_place_radar?
