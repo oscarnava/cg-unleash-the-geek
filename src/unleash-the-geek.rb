@@ -5,6 +5,7 @@
 # Bronze      994   1,158    13.90
 # Bronze      592   1,167    26.85
 # Bronze      611   1,209    27.30
+# Bronze      591   1,212    27.85
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -87,8 +88,10 @@ class ScanSectorTask < Task
       return request :RADAR
     end
 
-    near_ore = @gs.nearest_ore(@bot)
-    @target = near_ore.pos if near_ore
+    unless @bot.carrying?
+      near_ore = @gs.nearest_ore(@bot)
+      @target = near_ore.pos if near_ore
+    end
 
     if @bot.can_dig? @target
       dig_at @target do
