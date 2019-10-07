@@ -209,6 +209,10 @@ class Board
     @ores.delete(cell) unless cell.contains_ore?
   end
 
+  def ore_count
+    @ores.map(&:ore).sum
+  end
+
   def read_state
     @ores = []
     HEIGHT.times do |row|
