@@ -4,6 +4,7 @@
 # Bronze      981   1,127    13.51
 # Bronze      994   1,158    13.90
 # Bronze      592   1,167    26.85
+# Bronze      611   1,209    27.30
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -83,8 +84,13 @@ class ScanSectorTask < Task
       @top = (idx / HORZ_SECTORS) * SECTOR_SIZE
       @left = (idx % HORZ_SECTORS) * SECTOR_SIZE
       @target = Position.new(@top + SECTOR_SIZE / 2, @left + SECTOR_SIZE / 2)
-      request :RADAR
-    elsif @bot.can_dig? @target
+      return request :RADAR
+    end
+
+    near_ore = @gs.nearest_ore(@bot)
+    @target = near_ore.pos if near_ore
+
+    if @bot.can_dig? @target
       dig_at @target do
         @target = nil
       end
@@ -105,6 +111,9 @@ class MineOreTask < Task
   end
 
   def next_command
+    near_ore = @gs.nearest_ore(@bot)
+    @target = @bot.nearest(near_ore.pos, @target) if near_ore
+
     if @bot.can_dig? @target
       dig_at @target do
         @target = nil
@@ -262,6 +271,14 @@ class Robot < Entity
     @pos = Position.new(row, col)
     @item = INT_TO_ITEM[item_id]
     self
+  end
+
+  def distance_to(pos)
+    @pos.distance_to pos
+  end
+
+  def nearest(pos1, pos2)
+    distance_to(pos) < distance_to(pos2) ? pos1 : pos2
   end
 
   def mine?
