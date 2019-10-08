@@ -6,6 +6,9 @@
 # Bronze      592   1,167    26.85
 # Bronze      611   1,209    27.30
 # Bronze      591   1,212    27.85
+# Bronze      455   1,212    30.90
+# Bronze      142     931    29.26
+# Bronze       73     932    31.22
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -15,12 +18,19 @@ def gets
   org_gets # .tap { |v| warn v }
 end
 
-def sqr(num)
-  num * num
+INT_TO_ITEM = { -1 => :none, 2 => :radar, 3 => :trap, 4 => :ore }.freeze
+class Integer
+  def sqr
+    self * self
+  end
+
+  def to_item
+    INT_TO_ITEM[self]
+  end
 end
 
 WIDTH, HEIGHT = gets.split(' ').collect(&:to_i) # 30 x 15
-INT_TO_ITEM = { -1 => :none, 2 => :radar, 3 => :trap, 4 => :ore }.freeze
+
 SECTOR_SIZE = 5
 HORZ_SECTORS = WIDTH / SECTOR_SIZE
 VERT_SECTORS = HEIGHT / SECTOR_SIZE
@@ -28,12 +38,12 @@ VERT_SECTORS = HEIGHT / SECTOR_SIZE
 class Position
   attr_reader :row, :col
   def initialize(row, col)
-    @row = row
-    @col = col
+    @row = row.clamp(0, HEIGHT - 1)
+    @col = col.clamp(0, WIDTH - 1)
   end
 
   def distance_to(pos)
-    Math.sqrt(sqr(row - pos.row) + sqr(col - pos.col))
+    Math.sqrt((row - pos.row).sqr + (col - pos.col).sqr)
   end
 
   def self.random
@@ -81,14 +91,13 @@ class ScanSectorTask < Task
 
   def next_command
     if @bot.at_hq? && @gs.can_place_radar? && !@bot.carrying?
-      idx = @gs.available_radar_sector
-      @top = (idx / HORZ_SECTORS) * SECTOR_SIZE
-      @left = (idx % HORZ_SECTORS) * SECTOR_SIZE
-      @target = Position.new(@top + SECTOR_SIZE / 2, @left + SECTOR_SIZE / 2)
+      @target = @gs.available_radar_pos
       return request :RADAR
     end
 
-    unless @bot.carrying?
+    if @bot.carrying_radar?
+      @target = @gs.available_radar_pos if @gs.available_radar_pos
+    else
       near_ore = @gs.nearest_ore(@bot)
       @target = near_ore.pos if near_ore
     end
@@ -154,8 +163,7 @@ class DeliverOreTask < Task
 end
 
 class Cell
-  attr_reader :ore, :hole
-  attr_reader :pos
+  attr_reader :ore, :hole, :pos, :entities
 
   def initialize(pos)
     @pos = pos
@@ -163,9 +171,14 @@ class Cell
     @hole = nil
   end
 
+  def entity=(entity)
+    @entities = @entities.nil? ? [entity] : @entities << entity
+  end
+
   def set_state(ore, hole)
     @ore = ore.to_i if ore != '?'
     @hole = :opponent if @hole.nil? && hole == '1'
+    @entities = nil
   end
 
   def claim_hole
@@ -180,6 +193,10 @@ class Cell
     @ore&.positive?
   end
 
+  def contains_item_type?(type)
+    @entities&.any? { |itm| itm.is_a? type }
+  end
+
   def decrement_ore
     @ore -= 1 if contains_ore?
   end
@@ -189,7 +206,14 @@ class Cell
   end
 
   def to_s
-    "[#{@ore}]"
+    ent = if @entities.nil?
+            ' '
+          elsif @entities.size > 1
+            @entities.size
+          else
+            @entities.first.to_s
+          end
+    "#{@ore || '.'}#{ent}"
   end
 end
 
@@ -240,19 +264,18 @@ class Board
   end
 
   def to_s
-    @cells.map do |row|
-      row.map do |cell|
-        cell&.ore || '?'
-      end.join('.')
-    end.join("\n") + "\n" + @ores.map(&:pos).join(',')
+    @cells
+      .map { |row| row.join('') }
+      .join("\n") # + "\n" + @ores.map(&:pos).join(',')
   end
 end
 
 class Entity
-  attr_reader :id
+  attr_reader :id, :pos
 
-  def initialize(id)
+  def initialize(id, col, row)
     @id = id
+    @pos = Position.new(row, col)
   end
 end
 
@@ -261,9 +284,8 @@ class Robot < Entity
   attr_writer :task
 
   def initialize(id, col, row, item_id, owner)
-    super id
-    @pos = Position.new(row, col)
-    @item = INT_TO_ITEM[item_id]
+    super id, col, row
+    @item = item_id.to_item
     @owner = owner
     @last_pos = @pos
     @last_cmd = nil
@@ -272,7 +294,7 @@ class Robot < Entity
   def update(col, row, item_id)
     @last_pos = @pos
     @pos = Position.new(row, col)
-    @item = INT_TO_ITEM[item_id]
+    @item = item_id.to_item
     self
   end
 
@@ -300,6 +322,10 @@ class Robot < Entity
     @item != :none
   end
 
+  def carrying_radar?
+    @item == :radar
+  end
+
   def can_dig?(pos)
     @pos == pos ||
       @pos.col == pos.col && (@pos.row - pos.row).abs <= 1 ||
@@ -318,30 +344,39 @@ class Robot < Entity
     @last_cmd = @task&.next_command
   end
 
-  def to_s
+  def inspect
     "Robot \##{@id} @ [#{@pos}]" + mine? { enabled? ? " (#{@item})" : ' (X)' }.to_s
+  end
+
+  def to_s
+    'R'
   end
 end
 
 class Radar < Entity
-  def initialize(id)
-    super id
-  end
-
   def to_s
-    "Radar \##{@id} @ [#{@pos}]"
+    'Y'
   end
 end
 
 class Trap < Entity
-  def initialize(id)
-    super id
-  end
-
   def to_s
-    "Trap \##{@id} @ [#{@pos}]"
+    '='
   end
 end
+
+RADAR_LOCATIONS = [
+  Position.new(10, 5),
+  Position.new(2, 5),
+  Position.new(6, 10),
+  Position.new(10, 15),
+  Position.new(14, 10),
+  Position.new(2, 15),
+  Position.new(6, 20),
+  Position.new(14, 20),
+  Position.new(10, 25),
+  Position.new(2, 25)
+].freeze
 
 class GameState
   class Command
@@ -357,6 +392,7 @@ class GameState
     end
 
     def to_s
+      @msg = ''
       case @act
       when :MOVE, :DIG
         "#{@act} #{@pos} #{@msg}"
@@ -378,9 +414,6 @@ class GameState
     @robots = {}
     @my_bots = []
     @items = {}
-    @avail_radar_sectors = [8, 9, 10, 6, 7, 11,
-                            2, 3, 14, 15, 4, 5, 16, 17,
-                            0, 12, 1, 13]
   end
 
   def move_to(target, msg: nil)
@@ -424,10 +457,10 @@ class GameState
       when 0, 1
         @robots[id] = @robots[id]&.update(col, row, item_id) || Robot.new(id, col, row, item_id, type)
       when 2
-        @items[id] = Radar.new(id)
+        @items[id] = Radar.new(id, col, row)
       when 3
-        @items[id] = Trap.new(id)
-      end
+        @items[id] = Trap.new(id, col, row)
+      end.tap { |entity| @board[entity.pos].entity = entity }
     end
 
     @my_bots = @robots.map(&:last).select(&:mine?)
@@ -437,12 +470,13 @@ class GameState
     @radar_cooldown.zero?
   end
 
-  def available_radar_sector
-    @avail_radar_sectors.shift
+  def available_radar_pos
+    RADAR_LOCATIONS.find { |pos| !@board[pos].contains_item_type? Radar }
+    # .tap { |loc| warn "Radar location: #{loc}" }
   end
 
   def can_place_radar?
-    !@avail_radar_sectors.empty? && radar_available?
+    radar_available? && available_radar_pos
   end
 
   def trap_available?
@@ -459,7 +493,7 @@ class GameState
 
       bot.task = if bot.carrying?
                    DeliverOreTask.new(self, bot)
-                 elsif !(bot.at_hq? && can_place_radar?) && (ore_cell = nearest_ore(bot))
+                 elsif ((@board.ore_count > 10) || !(bot.at_hq? && can_place_radar?)) && (ore_cell = nearest_ore(bot))
                    @board.decrement_ore(ore_cell.pos)
                    MineOreTask.new(self, bot, ore_cell)
                  else
