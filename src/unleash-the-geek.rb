@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+DEBUG = true
+
 # Rank    Position  Total   Points
 # Bronze      981   1,127    13.51
 # Bronze      994   1,158    13.90
@@ -12,6 +14,7 @@
 # Bronze      102     929    30.45
 # Bronze       45     927    32.00
 # Silver      528     560    12.00
+# Silver      402     555    15.53
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -108,7 +111,7 @@ class NoTask < Task
   end
 
   def next_command
-    warn
+    wait
   end
 end
 
@@ -184,7 +187,7 @@ class DeliverOreTask < Task
   end
 
   def finished?
-    @bot.at_hq?
+    super || @bot.at_hq?
   end
 end
 
@@ -268,7 +271,15 @@ class Cell
           else
             @entities.first.to_s
           end
-    "#{@ore || '.'}#{ent}"
+    ore = case @hole
+          when :player
+            @ore ? %w[O A B C D E F][@ore] : 'H'
+          when :opponent
+            @ore ? %w[° a b c d e f][@ore] : 'h'
+          else
+            @ore&.zero? ? '_' : @ore || '.'
+          end
+    "#{ore}#{ent}"
   end
 end
 
@@ -291,6 +302,7 @@ class Board
   end
 
   def nearest_ore(pos, min_size: 1, max_size: 99)
+    # TODO: Filtrar los hoyos enemigos
     @ores
       .select { |cell| cell.ore.between?(min_size, max_size) && !cell.trap? }
       .min_by { |cell| pos.distance_to cell.pos }
@@ -347,15 +359,26 @@ class Robot < Entity
   def initialize(id, col, row, item_id, owner)
     super id, col, row
     @item = item_id.to_item
-    @owner = owner
+    @owner = %i[player opponent][owner]
     @last_pos = @pos
     @last_cmd = nil
+    @carry = false
   end
 
   def update(col, row, item_id)
     @last_pos = @pos
-    @pos = Position.new(row, col)
-    @item = item_id.to_item
+    if row.negative?
+      @pos = nil
+      @item = :none
+    else
+      @pos = Position.new(row, col)
+      @item = item_id.to_item
+      @dropped = false
+      if @pos == @last_pos
+        @carry = at_hq?
+        @dropped = !@carry
+      end
+    end
     self
   end
 
@@ -369,18 +392,18 @@ class Robot < Entity
 
   def mine?
     if block_given?
-      yield if @owner.zero?
+      yield if @owner == :player
     else
-      @owner.zero?
+      @owner == :player
     end
   end
 
-  def enabled?
-    !@pos.row.negative?
+  def disabled?
+    @pos.nil?
   end
 
-  def disabled?
-    @pos.row.negative?
+  def enabled?
+    !disabled?
   end
 
   def carrying?(item = nil)
@@ -414,7 +437,12 @@ class Robot < Entity
   end
 
   def to_s
-    'R'
+    case @owner
+    when :player
+      carrying? ? 'R' : 'r'
+    else
+      @carry ? 'S' : 's'
+    end
   end
 end
 
@@ -461,7 +489,7 @@ class GameState
     end
 
     def to_s
-      @msg = ''
+      @msg = '' unless DEBUG
       case @act
       when :MOVE, :DIG
         "#{@act} #{@pos} #{@msg}"
@@ -533,7 +561,7 @@ class GameState
         @items[id] = Radar.new(id, col, row)
       when 3
         @items[id] = Trap.new(id, col, row)
-      end.tap { |entity| @board[entity.pos].entity = entity }
+      end.tap { |entity| @board[entity.pos].entity = entity if entity.pos }
     end
 
     @my_bots = @robots.map(&:last).select(&:mine?)
@@ -609,6 +637,6 @@ gs = GameState.new
 
 loop do
   gs.read_state
-  # warn gs
+  warn gs if DEBUG
   puts gs.moves
 end
