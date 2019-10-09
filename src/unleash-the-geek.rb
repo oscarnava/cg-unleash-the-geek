@@ -9,6 +9,8 @@
 # Bronze      455   1,212    30.90
 # Bronze      142     931    29.26
 # Bronze       73     932    31.22
+# Bronze      102     929    30.45
+# Bronze       45     927    32.00
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -79,6 +81,10 @@ class Task
     yield if block_given?
     @gs.request item, msg: self.class
   end
+
+  def wait
+    @gs.wait msg: self.class
+  end
 end
 
 class ScanSectorTask < Task
@@ -95,7 +101,7 @@ class ScanSectorTask < Task
       return request :RADAR
     end
 
-    if @bot.carrying_radar?
+    if @bot.carrying? :radar
       @target = @gs.available_radar_pos if @gs.available_radar_pos
     else
       near_ore = @gs.nearest_ore(@bot)
@@ -162,6 +168,37 @@ class DeliverOreTask < Task
   end
 end
 
+class PlaceTrapTask < Task
+  attr_reader :target
+
+  def initialize(state, bot)
+    super state, bot
+    @target = (state.nearest_ore(bot, min_size: 2, max_size: 2) ||
+               state.nearest_ore(bot, min_size: 2))&.pos
+  end
+
+  def next_command
+    return request :TRAP unless @bot.carrying? :trap
+
+    @target = (@gs.nearest_ore(@bot, min_size: 2, max_size: 2) ||
+               @gs.nearest_ore(@bot, min_size: 2))&.pos
+
+    return wait if @target.nil?
+
+    if @bot.can_dig? @target
+      dig_at @target do
+        @target = nil
+      end
+    else
+      move_to @target
+    end
+  end
+
+  def finished?
+    @target.nil?
+  end
+end
+
 class Cell
   attr_reader :ore, :hole, :pos, :entities
 
@@ -193,12 +230,16 @@ class Cell
     @ore&.positive?
   end
 
+  def trap?
+    @entities&.any?(&:trap?)
+  end
+
   def contains_item_type?(type)
     @entities&.any? { |itm| itm.is_a? type }
   end
 
-  def decrement_ore
-    @ore -= 1 if contains_ore?
+  def decrement_ore(clear: false)
+    @ore -= (clear ? @ore : 1) if contains_ore?
   end
 
   def distance_to(pos)
@@ -235,13 +276,15 @@ class Board
     @cells[pos.row][pos.col].hole
   end
 
-  def nearest_ore(pos)
-    @ores.min_by { |cell| pos.distance_to cell.pos }
+  def nearest_ore(pos, min_size: 1, max_size: 99)
+    @ores
+      .select { |cell| cell.ore.between?(min_size, max_size) && !cell.trap? }
+      .min_by { |cell| pos.distance_to cell.pos }
   end
 
-  def decrement_ore(pos)
+  def decrement_ore(pos, clear: false)
     cell = self[pos]
-    cell.decrement_ore
+    cell.decrement_ore clear: clear
     @ores.delete(cell) unless cell.contains_ore?
   end
 
@@ -276,6 +319,10 @@ class Entity
   def initialize(id, col, row)
     @id = id
     @pos = Position.new(row, col)
+  end
+
+  def trap?
+    false
   end
 end
 
@@ -318,12 +365,8 @@ class Robot < Entity
     !@pos.row.negative?
   end
 
-  def carrying?
-    @item != :none
-  end
-
-  def carrying_radar?
-    @item == :radar
+  def carrying?(item = nil)
+    item.nil? ? @item != :none : @item == item
   end
 
   def can_dig?(pos)
@@ -363,6 +406,10 @@ class Trap < Entity
   def to_s
     '='
   end
+
+  def trap?
+    true
+  end
 end
 
 RADAR_LOCATIONS = [
@@ -399,7 +446,7 @@ class GameState
       when :REQUEST
         "#{@act} #{@itm} #{@msg}"
       else
-        @act.to_s
+        "#{@act} #{@msg}"
       end
     end
   end
@@ -433,6 +480,10 @@ class GameState
       @trap_cooldown = 5
     end
     Command.new(:REQUEST, item: item, msg: msg)
+  end
+
+  def wait(msg: nil)
+    Command.new(:WAIT, msg: msg)
   end
 
   def read_state
@@ -483,19 +534,21 @@ class GameState
     @trap_cooldown.zero?
   end
 
-  def nearest_ore(bot)
-    @board.nearest_ore bot.pos
+  def nearest_ore(bot, min_size: 1, max_size: 99)
+    @board.nearest_ore(bot.pos, min_size: min_size, max_size: max_size)
   end
 
   def assign_tasks
     @my_bots.each do |bot|
       next unless bot.finished_task?
 
-      bot.task = if bot.carrying?
+      bot.task = if bot.carrying? :ore
                    DeliverOreTask.new(self, bot)
                  elsif ((@board.ore_count > 10) || !(bot.at_hq? && can_place_radar?)) && (ore_cell = nearest_ore(bot))
                    @board.decrement_ore(ore_cell.pos)
                    MineOreTask.new(self, bot, ore_cell)
+                 elsif bot.at_hq? && trap_available? && nearest_ore(bot, min_size: 2)
+                   PlaceTrapTask.new(self, bot).tap { |tsk| @board.decrement_ore(tsk.target, clear: true) }
                  else
                    ScanSectorTask.new(self, bot)
                  end
