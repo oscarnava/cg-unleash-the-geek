@@ -11,6 +11,7 @@
 # Bronze       73     932    31.22
 # Bronze      102     929    30.45
 # Bronze       45     927    32.00
+# Silver      528     560    12.00
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -65,11 +66,16 @@ class Task
   def initialize(state, bot)
     @gs = state
     @bot = bot
+    @done = false
   end
 
   def move_to(target)
     yield if block_given?
     @gs.move_to target, msg: self.class
+  end
+
+  def move_to_hq
+    move_to @bot.hq
   end
 
   def dig_at(target)
@@ -85,86 +91,100 @@ class Task
   def wait
     @gs.wait msg: self.class
   end
+
+  def finish_by
+    @done = true
+    yield
+  end
+
+  def finished?
+    @done || @bot.disabled?
+  end
+end
+
+class NoTask < Task
+  def initialize(state, bot)
+    super state, bot
+  end
+
+  def next_command
+    warn
+  end
 end
 
 class ScanSectorTask < Task
   def initialize(state, bot, num = rand(VERT_SECTORS * HORZ_SECTORS))
     super state, bot
-    @top = (num / HORZ_SECTORS) * SECTOR_SIZE
-    @left = (num % HORZ_SECTORS) * SECTOR_SIZE
-    @target = Position.new(@top + rand(SECTOR_SIZE), @left + rand(SECTOR_SIZE))
+    # # @top = (num / HORZ_SECTORS) * SECTOR_SIZE
+    # # @left = (num % HORZ_SECTORS) * SECTOR_SIZE
+    # @target = Position.new(@top + rand(SECTOR_SIZE), @left + rand(SECTOR_SIZE))
   end
 
   def next_command
-    if @bot.at_hq? && @gs.can_place_radar? && !@bot.carrying?
-      @target = @gs.available_radar_pos
-      return request :RADAR
-    end
-
-    if @bot.carrying? :radar
-      @target = @gs.available_radar_pos if @gs.available_radar_pos
-    else
-      near_ore = @gs.nearest_ore(@bot)
-      @target = near_ore.pos if near_ore
-    end
+    @target = @gs.nearest_ore(@bot)&.pos
+    return finish_by { wait } if @target.nil?
 
     if @bot.can_dig? @target
-      dig_at @target do
-        @target = nil
-      end
+      finish_by { dig_at @target }
     else
       move_to @target
     end
   end
+end
 
-  def finished?
-    @target.nil?
+class PlaceRadarTask < Task
+  def initialize(state, bot)
+    super state, bot
+  end
+
+  def next_command
+    unless @bot.carrying?(:radar)
+      return move_to_hq unless @bot.at_hq?
+      return wait unless @gs.can_place_radar?
+
+      return request :RADAR
+    end
+
+    target = @gs.available_radar_pos
+
+    if @bot.can_dig? target
+      finish_by { dig_at target }
+    else
+      move_to target
+    end
   end
 end
 
 class MineOreTask < Task
-  def initialize(state, bot, cell)
+  def initialize(state, bot)
     super state, bot
-    @target = cell.pos
   end
 
   def next_command
-    near_ore = @gs.nearest_ore(@bot)
-    @target = @bot.nearest(near_ore.pos, @target) if near_ore
-
-    if @bot.can_dig? @target
-      dig_at @target do
-        @target = nil
-      end
-    else
-      move_to @target
+    unless (target = @gs.nearest_ore(@bot)&.pos)
+      return finish_by { wait }
     end
-  end
 
-  def finished?
-    @target.nil?
+    if @bot.can_dig? target
+      finish_by { dig_at target }
+    else
+      move_to target
+    end
   end
 end
 
 class DeliverOreTask < Task
   def initialize(state, bot)
     super state, bot
-    @target = Position.new(bot.pos.row, 0)
   end
 
   def next_command
     # warn "bot: #{@bot}, target: #{@target}"
-    if @bot.pos.col <= 4
-      move_to @target do
-        @target = nil
-      end
-    else
-      move_to @target
-    end
+    move_to_hq
   end
 
   def finished?
-    @target.nil?
+    @bot.at_hq?
   end
 end
 
@@ -186,16 +206,10 @@ class PlaceTrapTask < Task
     return wait if @target.nil?
 
     if @bot.can_dig? @target
-      dig_at @target do
-        @target = nil
-      end
+      finish_by { dig_at @target }
     else
       move_to @target
     end
-  end
-
-  def finished?
-    @target.nil?
   end
 end
 
@@ -365,6 +379,10 @@ class Robot < Entity
     !@pos.row.negative?
   end
 
+  def disabled?
+    @pos.row.negative?
+  end
+
   def carrying?(item = nil)
     item.nil? ? @item != :none : @item == item
   end
@@ -377,6 +395,10 @@ class Robot < Entity
 
   def at_hq?
     @pos.col.zero?
+  end
+
+  def hq
+    Position.new(pos.row, 0)
   end
 
   def finished_task?
@@ -434,8 +456,8 @@ class GameState
       @msg = msg
     end
 
-    def self.random
-      Command.new(:DIG, pos: Position.random)
+    def action
+      act
     end
 
     def to_s
@@ -539,16 +561,22 @@ class GameState
   end
 
   def assign_tasks
+    radar_avail = can_place_radar?
+    trap_avail = trap_available?
     @my_bots.each do |bot|
       next unless bot.finished_task?
 
-      bot.task = if bot.carrying? :ore
+      bot.task = if bot.disabled?
+                   NoTask.new self, bot
+                 elsif bot.carrying? :ore
                    DeliverOreTask.new(self, bot)
-                 elsif ((@board.ore_count > 10) || !(bot.at_hq? && can_place_radar?)) && (ore_cell = nearest_ore(bot))
+                 elsif radar_avail && @board.ore_count < 10
+                   PlaceRadarTask.new(self, bot).tap { radar_avail = false }
+                 elsif bot.at_hq? && trap_avail && nearest_ore(bot, min_size: 2)
+                   PlaceTrapTask.new(self, bot).tap { |tsk| @board.decrement_ore(tsk.target, clear: true); trap_avail = false }
+                 elsif (ore_cell = nearest_ore(bot))
                    @board.decrement_ore(ore_cell.pos)
-                   MineOreTask.new(self, bot, ore_cell)
-                 elsif bot.at_hq? && trap_available? && nearest_ore(bot, min_size: 2)
-                   PlaceTrapTask.new(self, bot).tap { |tsk| @board.decrement_ore(tsk.target, clear: true) }
+                   MineOreTask.new(self, bot)
                  else
                    ScanSectorTask.new(self, bot)
                  end
