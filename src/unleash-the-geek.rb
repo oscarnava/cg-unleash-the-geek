@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-DEBUG = true
+DEBUG = false
 
 # Rank    Position  Total   Points
 # Bronze      981   1,127    13.51
@@ -15,6 +15,10 @@ DEBUG = true
 # Bronze       45     927    32.00
 # Silver      528     560    12.00
 # Silver      402     555    15.53
+# Silver      406     557    15.36
+# Silver      284     556    17.43
+# Silver      258     558    17.81
+# Silver      165     558    19.88
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -116,11 +120,8 @@ class NoTask < Task
 end
 
 class ScanSectorTask < Task
-  def initialize(state, bot, num = rand(VERT_SECTORS * HORZ_SECTORS))
+  def initialize(state, bot)
     super state, bot
-    # # @top = (num / HORZ_SECTORS) * SECTOR_SIZE
-    # # @left = (num % HORZ_SECTORS) * SECTOR_SIZE
-    # @target = Position.new(@top + rand(SECTOR_SIZE), @left + rand(SECTOR_SIZE))
   end
 
   def next_command
@@ -149,6 +150,7 @@ class PlaceRadarTask < Task
     end
 
     target = @gs.available_radar_pos
+    return finish_by { wait } if target.nil?
 
     if @bot.can_dig? target
       finish_by { dig_at target }
@@ -217,12 +219,13 @@ class PlaceTrapTask < Task
 end
 
 class Cell
+  attr_accessor :dangerous
   attr_reader :ore, :hole, :pos, :entities
 
   def initialize(pos)
     @pos = pos
     @ore = nil
-    @hole = nil
+    @hole = :none
   end
 
   def entity=(entity)
@@ -231,7 +234,7 @@ class Cell
 
   def set_state(ore, hole)
     @ore = ore.to_i if ore != '?'
-    @hole = :opponent if @hole.nil? && hole == '1'
+    @hole = :opponent if @hole == :none && hole == '1'
     @entities = nil
   end
 
@@ -265,7 +268,7 @@ class Cell
 
   def to_s
     ent = if @entities.nil?
-            ' '
+            @dangerous ? '!' : ' '
           elsif @entities.size > 1
             @entities.size
           else
@@ -304,7 +307,7 @@ class Board
   def nearest_ore(pos, min_size: 1, max_size: 99)
     # TODO: Filtrar los hoyos enemigos
     @ores
-      .select { |cell| cell.ore.between?(min_size, max_size) && !cell.trap? }
+      .select { |cell| cell.ore.between?(min_size, max_size) && !cell.trap? && !cell.dangerous }
       .min_by { |cell| pos.distance_to cell.pos }
   end
 
@@ -363,6 +366,7 @@ class Robot < Entity
     @last_pos = @pos
     @last_cmd = nil
     @carry = false
+    @dropped = false
   end
 
   def update(col, row, item_id)
@@ -375,8 +379,8 @@ class Robot < Entity
       @item = item_id.to_item
       @dropped = false
       if @pos == @last_pos
+        @dropped = @carry && !at_hq?
         @carry = at_hq?
-        @dropped = !@carry
       end
     end
     self
@@ -414,6 +418,15 @@ class Robot < Entity
     @pos == pos ||
       @pos.col == pos.col && (@pos.row - pos.row).abs <= 1 ||
       @pos.row == pos.row && (@pos.col - pos.col).abs <= 1
+  end
+
+  def mark_dangerous(board)
+    return unless @dropped
+
+    board[@pos].dangerous = true
+    [[-1, 0], [0, -1], [1, 0], [0, 1]].each do |(dr,dc)|
+      board[Position.new(@pos.row + dr, @pos.col + dc)]&.dangerous = true
+    end
   end
 
   def at_hq?
@@ -556,7 +569,8 @@ class GameState
 
       case type
       when 0, 1
-        @robots[id] = @robots[id]&.update(col, row, item_id) || Robot.new(id, col, row, item_id, type)
+        (@robots[id] = @robots[id]&.update(col, row, item_id) || Robot.new(id, col, row, item_id, type))
+          .tap { |bot| bot.mark_dangerous(@board) unless bot.mine? }
       when 2
         @items[id] = Radar.new(id, col, row)
       when 3
@@ -598,7 +612,7 @@ class GameState
                    NoTask.new self, bot
                  elsif bot.carrying? :ore
                    DeliverOreTask.new(self, bot)
-                 elsif radar_avail && @board.ore_count < 10
+                 elsif radar_avail # && @board.ore_count < 10
                    PlaceRadarTask.new(self, bot).tap { radar_avail = false }
                  elsif bot.at_hq? && trap_avail && nearest_ore(bot, min_size: 2)
                    PlaceTrapTask.new(self, bot).tap { |tsk| @board.decrement_ore(tsk.target, clear: true); trap_avail = false }
