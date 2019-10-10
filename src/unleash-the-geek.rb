@@ -21,6 +21,10 @@ DEBUG = false
 # Silver      165     558    19.88
 # Silver      174     555    19.81
 # Silver      169     566    20.25
+# Silver       99     577    22.07
+# Silver      129     586    21.68
+# Silver      150     588    21.27
+# Silver      126     590    21.85
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -200,7 +204,7 @@ class PlaceTrapTask < Task
 
   def initialize(state, bot)
     super state, bot
-    @target = (state.nearest_ore(bot, min_size: 2, max_size: 2) ||
+    @target = (state.nearest_ore(bot, min_size: 3, max_size: 3) ||
                state.nearest_ore(bot, min_size: 2))&.pos
   end
 
@@ -325,11 +329,13 @@ class Board
     end
   end
 
+  def nearest_ore_list(min_size: 1, max_size: 99)
+    @ores.select { |cell| cell.ore.between?(min_size, max_size) && !cell.trap? && !cell.dangerous }
+    # @ores.select { |cell| cell.ore.between?(min_size, max_size) && !cell.trap? } if list.empty?
+  end
+
   def nearest_ore(pos, min_size: 1, max_size: 99)
-    # TODO: Filtrar los hoyos enemigos
-    list = @ores.select { |cell| cell.ore.between?(min_size, max_size) && !cell.trap? && !cell.dangerous }
-    # list = @ores.select { |cell| cell.ore.between?(min_size, max_size) && !cell.trap? } if list.empty?
-    list.min_by { |cell| pos.distance_to cell.pos }
+    nearest_ore_list(min_size: min_size, max_size: max_size).min_by { |cell| pos.distance_to cell.pos }
   end
 
   def decrement_ore(pos, clear: false)
@@ -339,7 +345,7 @@ class Board
   end
 
   def ore_count
-    @ores.map(&:ore).sum
+    nearest_ore_list.map(&:ore).sum
   end
 
   def read_state
@@ -506,16 +512,22 @@ class Trap < Entity
 end
 
 RADAR_LOCATIONS = [
-  Position.new(10, 5),
-  Position.new(2, 5),
-  Position.new(6, 10),
-  Position.new(10, 15),
-  Position.new(14, 10),
-  Position.new(2, 15),
-  Position.new(6, 20),
-  Position.new(14, 20),
-  Position.new(10, 25),
-  Position.new(2, 25)
+  Position.new(7, 8),
+  Position.new(2, 12),
+  Position.new(12, 12),
+
+  Position.new(2, 4),
+  Position.new(12, 4),
+
+  Position.new(7, 15),
+  Position.new(2, 19),
+  Position.new(12, 19),
+
+  Position.new(7, 23),
+  Position.new(2, 27),
+  Position.new(12, 27),
+
+  Position.new(7, 27)
 ].freeze
 
 class GameState
@@ -616,7 +628,10 @@ class GameState
   end
 
   def available_radar_pos
-    RADAR_LOCATIONS.find { |pos| !@board[pos].contains_item_type? Radar }
+    RADAR_LOCATIONS.find do |pos|
+      cell = @board[pos]
+      !(cell.dangerous || cell.contains_item_type?(Radar))
+    end
     # .tap { |loc| warn "Radar location: #{loc}" }
   end
 
@@ -646,7 +661,7 @@ class GameState
                    NoTask.new self, bot
                  elsif bot.carrying? :ore
                    DeliverOreTask.new(self, bot)
-                 elsif radar_avail
+                 elsif radar_avail # && @board.ore_count < 7
                    PlaceRadarTask.new(self, bot).tap { radar_avail = false }
                  elsif bot.at_hq? && trap_avail && nearest_ore(bot, min_size: 2)
                    PlaceTrapTask.new(self, bot).tap { |tsk| @board.decrement_ore(tsk.target, clear: true); trap_avail = false }
