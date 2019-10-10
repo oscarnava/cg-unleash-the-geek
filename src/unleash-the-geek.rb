@@ -19,6 +19,8 @@ DEBUG = false
 # Silver      284     556    17.43
 # Silver      258     558    17.81
 # Silver      165     558    19.88
+# Silver      174     555    19.81
+# Silver      169     566    20.25
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -220,12 +222,13 @@ end
 
 class Cell
   attr_accessor :dangerous
-  attr_reader :ore, :hole, :pos, :entities
+  attr_reader :ore, :hole, :pos, :entities, :just_digged
 
   def initialize(pos)
     @pos = pos
     @ore = nil
     @hole = :none
+    @just_digged = false
   end
 
   def entity=(entity)
@@ -233,13 +236,25 @@ class Cell
   end
 
   def set_state(ore, hole)
-    @ore = ore.to_i if ore != '?'
-    @hole = :opponent if @hole == :none && hole == '1'
+    @just_digged = false
+    if ore != '?'
+      ore = ore.to_i
+      @just_digged = true if @ore && @ore > ore
+      @ore = ore
+    end
+    if !hole? && hole == '1'
+      @hole = :opponent
+      @just_digged = true
+    end
     @entities = nil
   end
 
   def claim_hole
     @hole = :player
+  end
+
+  def hole?
+    @hole != :none
   end
 
   def my_hole?
@@ -304,11 +319,17 @@ class Board
     @cells[pos.row][pos.col].hole
   end
 
+  def each_neighbour(pos, &block)
+    [[0, 0], [-1, 0], [0, -1], [1, 0], [0, 1]].each do |(dr, dc)|
+      @cells[pos.row + dr]&.[](pos.col + dc)&.tap(&block)
+    end
+  end
+
   def nearest_ore(pos, min_size: 1, max_size: 99)
     # TODO: Filtrar los hoyos enemigos
-    @ores
-      .select { |cell| cell.ore.between?(min_size, max_size) && !cell.trap? && !cell.dangerous }
-      .min_by { |cell| pos.distance_to cell.pos }
+    list = @ores.select { |cell| cell.ore.between?(min_size, max_size) && !cell.trap? && !cell.dangerous }
+    # list = @ores.select { |cell| cell.ore.between?(min_size, max_size) && !cell.trap? } if list.empty?
+    list.min_by { |cell| pos.distance_to cell.pos }
   end
 
   def decrement_ore(pos, clear: false)
@@ -357,7 +378,7 @@ end
 
 class Robot < Entity
   attr_reader :pos, :item
-  attr_writer :task
+  attr_accessor :task
 
   def initialize(id, col, row, item_id, owner)
     super id, col, row
@@ -421,11 +442,20 @@ class Robot < Entity
   end
 
   def mark_dangerous(board)
-    return unless @dropped
+    return if disabled? || !@dropped
 
-    board[@pos].dangerous = true
-    [[-1, 0], [0, -1], [1, 0], [0, 1]].each do |(dr,dc)|
-      board[Position.new(@pos.row + dr, @pos.col + dc)]&.dangerous = true
+    marked = 0
+    board.each_neighbour(@pos) do |cell|
+      if cell.just_digged && cell.hole == :opponent
+        cell.dangerous = true
+        marked += 1
+      end
+    end
+
+    return if marked.positive?
+
+    board.each_neighbour(@pos) do |cell|
+      cell.dangerous |= cell.hole?
     end
   end
 
@@ -602,8 +632,12 @@ class GameState
     @board.nearest_ore(bot.pos, min_size: min_size, max_size: max_size)
   end
 
+  def placing_radar_count
+    @my_bots.count { |bot| bot.enabled? && bot.task.is_a?(PlaceRadarTask) }
+  end
+
   def assign_tasks
-    radar_avail = can_place_radar?
+    radar_avail = can_place_radar? # && placing_radar_count.zero?
     trap_avail = trap_available?
     @my_bots.each do |bot|
       next unless bot.finished_task?
@@ -612,7 +646,7 @@ class GameState
                    NoTask.new self, bot
                  elsif bot.carrying? :ore
                    DeliverOreTask.new(self, bot)
-                 elsif radar_avail # && @board.ore_count < 10
+                 elsif radar_avail
                    PlaceRadarTask.new(self, bot).tap { radar_avail = false }
                  elsif bot.at_hq? && trap_avail && nearest_ore(bot, min_size: 2)
                    PlaceTrapTask.new(self, bot).tap { |tsk| @board.decrement_ore(tsk.target, clear: true); trap_avail = false }
