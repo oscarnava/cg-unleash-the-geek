@@ -2,33 +2,35 @@
 
 DEBUG = false
 
-# Rank    Position  Total   Points
-# Bronze      981   1,127    13.51
-# Bronze      994   1,158    13.90
-# Bronze      592   1,167    26.85
-# Bronze      611   1,209    27.30
-# Bronze      591   1,212    27.85
-# Bronze      455   1,212    30.90
-# Bronze      142     931    29.26
-# Bronze       73     932    31.22
-# Bronze      102     929    30.45
-# Bronze       45     927    32.00
-# Silver      528     560    12.00
-# Silver      402     555    15.53
-# Silver      406     557    15.36
-# Silver      284     556    17.43
-# Silver      258     558    17.81
-# Silver      165     558    19.88
-# Silver      174     555    19.81
-# Silver      169     566    20.25
-# Silver       99     577    22.07
-# Silver      129     586    21.68
-# Silver      150     588    21.27
-# Silver      126     590    21.85
-# Silver       44     590    24.29
-# Gold        342     426    18.35
-# Gold        376     429    17.08
-# Gold        330     453    18.70
+# Rank    Position  Total   Global  Points
+# Bronze      981   1,127            13.51
+# Bronze      994   1,158            13.90
+# Bronze      592   1,167            26.85
+# Bronze      611   1,209            27.30
+# Bronze      591   1,212            27.85
+# Bronze      455   1,212            30.90
+# Bronze      142     931            29.26
+# Bronze       73     932            31.22
+# Bronze      102     929            30.45
+# Bronze       45     927            32.00
+# Silver      528     560            12.00
+# Silver      402     555            15.53
+# Silver      406     557            15.36
+# Silver      284     556            17.43
+# Silver      258     558            17.81
+# Silver      165     558            19.88
+# Silver      174     555            19.81
+# Silver      169     566            20.25
+# Silver       99     577            22.07
+# Silver      129     586            21.68
+# Silver      150     588            21.27
+# Silver      126     590            21.85
+# Silver       44     590            24.29
+# Gold        342     426            18.35
+# Gold        376     429            17.08
+# Gold        330     453            18.70
+# Gold        223     455      260   21.58
+# Gold        162     456      199   23.33
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -144,7 +146,7 @@ class ScanSectorTask < Task
   end
 
   def next_command
-    target = @gs.nearest_ore(@bot)&.pos || @gs.radar_bot&.pos # @rand_target
+    target = @gs.nearest_ore(@bot)&.pos || @rand_target
     return finish_by { wait } if target.nil?
 
     if @bot.can_dig? target
@@ -382,6 +384,17 @@ class Board
 
   def ore_count
     nearest_ore_list.map(&:ore).sum
+  end
+
+  def all_dangerous
+    danger = []
+    (0...HEIGHT).each do |row|
+      (0...WIDTH).each do |col|
+        cell = self[row: row, col: col]
+        danger << cell if cell.dangerous
+      end
+    end
+    danger
   end
 
   def read_state
@@ -708,6 +721,10 @@ class GameState
     @my_bots.find { |bot| bot.task.is_a? PlaceRadarTask }
   end
 
+  def all_traps
+    @items.values.select { |item| item.is_a? Trap }.map(&:pos) + @board.all_dangerous.map(&:pos)
+  end
+
   def trap_kills(pos, kills = { player: [], opponent: [] }, visited = {})
     @board.each_neighbour(pos) do |cell|
       next if visited[cell.pos]
@@ -721,13 +738,11 @@ class GameState
 
   def kamikazes
     bots = {}
-    @items.each do |_, item|
-      next unless item.is_a? Trap
-
-      kills = trap_kills(item.pos)
+    all_traps.each do |pos|
+      kills = trap_kills(pos)
       plys = kills[:player]
       opos = kills[:opponent]
-      bots[plys.first.id] = item.pos if plys.size == 1 && opos.size >= 1 && plys.none?(&:carrying_ore?)
+      bots[plys.first.id] = pos if plys.size == 1 && opos.size >= 1 && plys.none?(&:carrying_ore?)
     end
     bots
   end
