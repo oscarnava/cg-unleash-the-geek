@@ -1,3 +1,4 @@
 .vscode/*
 referee/*
 test/notepad.txt
+*.bak

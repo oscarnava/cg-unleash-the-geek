@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-DEBUG = true
+DEBUG = false
 
 # Rank    Position  Total   Points
 # Bronze      981   1,127    13.51
@@ -138,7 +138,7 @@ class ScanSectorTask < Task
     return unless (target = @gs.available_radar_pos)
 
     drow = rand(-4..4)
-    dcol = rand(-4..4)
+    dcol = rand((-4 + drow.abs)..(4 - drow.abs))
     Position.new(target.row + drow, target.col + dcol)
   end
 
@@ -146,7 +146,7 @@ class ScanSectorTask < Task
     target = @gs.nearest_ore(@bot)&.pos || @rand_target
     return finish_by { wait } if target.nil?
 
-    if @bot.can_dig?(target)
+    if @bot.can_dig? target
       finish_by { dig_at target }
     else
       move_to target
@@ -323,21 +323,25 @@ class Board
     @ores = []
   end
 
-  def [](pos)
-    @cells[pos.row][pos.col]
+  def [](pos = nil, row: pos.row, col: pos.col)
+    @cells[row]&.[](col)
   end
 
   def ore(pos)
-    @cells[pos.row][pos.col].ore
+    self[pos].ore
   end
 
   def hole(pos)
-    @cells[pos.row][pos.col].hole
+    self[pos].hole
   end
 
-  def each_neighbour(pos, &block)
-    [[0, 0], [-1, 0], [0, -1], [1, 0], [0, 1]].each do |(dr, dc)|
-      @cells[pos.row + dr]&.[](pos.col + dc)&.tap(&block)
+  def each_neighbour(pos, range: 1, &block)
+    self[pos].tap(&block)
+    (1..range).each do |delta|
+      self[row: pos.row + delta, col: pos.col]&.tap(&block)
+      self[row: pos.row - delta, col: pos.col]&.tap(&block)
+      self[row: pos.row, col: pos.col + delta]&.tap(&block)
+      self[row: pos.row, col: pos.col - delta]&.tap(&block)
     end
   end
 
