@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-DEBUG = false
+DEBUG = true
 
 # Rank    Position  Total   Points
 # Bronze      981   1,127    13.51
@@ -26,6 +26,7 @@ DEBUG = false
 # Silver      150     588    21.27
 # Silver      126     590    21.85
 # Silver       44     590    24.29
+# Gold        342     426    18.35
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -129,16 +130,25 @@ end
 class ScanSectorTask < Task
   def initialize(state, bot)
     super state, bot
+    @rand_target = around_next_radar
+  end
+
+  def around_next_radar
+    return unless (target = @gs.available_radar_pos)
+
+    drow = rand(-4..4)
+    dcol = rand((-4 + drow.abs)..(4 - drow.abs))
+    Position.new(target.row + drow, target.col + dcol)
   end
 
   def next_command
-    @target = @gs.nearest_ore(@bot)&.pos || @gs.radar_bot&.pos
-    return finish_by { wait } if @target.nil?
+    target = @gs.nearest_ore(@bot)&.pos || @rand_target
+    return finish_by { wait } if target.nil?
 
-    if @bot.can_dig? @target
-      finish_by { dig_at @target }
+    if @bot.can_dig?(target)
+      finish_by { dig_at target }
     else
-      move_to @target
+      move_to target
     end
   end
 end
@@ -625,6 +635,10 @@ class GameState
     @my_bots = @robots.map(&:last).select(&:mine?)
   end
 
+  def [](pos)
+    @board[pos]
+  end
+
   def radar_available?
     @radar_cooldown.zero?
   end
@@ -712,6 +726,6 @@ gs = GameState.new
 
 loop do
   gs.read_state
-  warn gs if DEBUG
+  # warn gs if DEBUG
   puts gs.moves
 end
