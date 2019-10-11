@@ -27,6 +27,7 @@ DEBUG = true
 # Silver      126     590    21.85
 # Silver       44     590    24.29
 # Gold        342     426    18.35
+# Gold        376     429    17.08
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -137,7 +138,7 @@ class ScanSectorTask < Task
     return unless (target = @gs.available_radar_pos)
 
     drow = rand(-4..4)
-    dcol = rand((-4 + drow.abs)..(4 - drow.abs))
+    dcol = rand(-4..4)
     Position.new(target.row + drow, target.col + dcol)
   end
 
