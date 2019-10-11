@@ -25,6 +25,7 @@ DEBUG = false
 # Silver      129     586    21.68
 # Silver      150     588    21.27
 # Silver      126     590    21.85
+# Silver       44     590    24.29
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -131,7 +132,7 @@ class ScanSectorTask < Task
   end
 
   def next_command
-    @target = @gs.nearest_ore(@bot)&.pos
+    @target = @gs.nearest_ore(@bot)&.pos || @gs.radar_bot&.pos
     return finish_by { wait } if @target.nil?
 
     if @bot.can_dig? @target
@@ -204,7 +205,7 @@ class PlaceTrapTask < Task
 
   def initialize(state, bot)
     super state, bot
-    @target = (state.nearest_ore(bot, min_size: 3, max_size: 3) ||
+    @target = (state.nearest_ore(bot, min_size: 2, max_size: 2) ||
                state.nearest_ore(bot, min_size: 2))&.pos
   end
 
@@ -574,6 +575,7 @@ class GameState
 
   def dig_at(target, msg: nil)
     @board[target].claim_hole
+    @board.decrement_ore(target)
     Command.new(:DIG, pos: target, msg: msg)
   end
 
@@ -651,22 +653,32 @@ class GameState
     @my_bots.count { |bot| bot.enabled? && bot.task.is_a?(PlaceRadarTask) }
   end
 
+  def radar_bot
+    @my_bots.find { |bot| bot.task.is_a? PlaceRadarTask }
+  end
+
   def assign_tasks
-    radar_avail = can_place_radar? # && placing_radar_count.zero?
+    radar_avail = can_place_radar? && !radar_bot
     trap_avail = trap_available?
     @my_bots.each do |bot|
       next unless bot.finished_task?
+
+      if bot.enabled?
+        ore_cell = nearest_ore(bot)
+        ore_dist = ore_cell&.distance_to(bot.pos) || 999
+      end
+
+      # warn "bot: #{bot} => ore: #{ore_cell} @ #{ore_cell&.pos}"
 
       bot.task = if bot.disabled?
                    NoTask.new self, bot
                  elsif bot.carrying? :ore
                    DeliverOreTask.new(self, bot)
-                 elsif radar_avail # && @board.ore_count < 7
+                 elsif radar_avail && ore_dist > 4
                    PlaceRadarTask.new(self, bot).tap { radar_avail = false }
-                 elsif bot.at_hq? && trap_avail && nearest_ore(bot, min_size: 2)
+                 elsif bot.at_hq? && trap_avail && nearest_ore(bot, min_size: 2) && ore_dist > 4
                    PlaceTrapTask.new(self, bot).tap { |tsk| @board.decrement_ore(tsk.target, clear: true); trap_avail = false }
-                 elsif (ore_cell = nearest_ore(bot))
-                   @board.decrement_ore(ore_cell.pos)
+                 elsif ore_cell
                    MineOreTask.new(self, bot)
                  else
                    ScanSectorTask.new(self, bot)
