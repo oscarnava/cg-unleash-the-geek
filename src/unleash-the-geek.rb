@@ -1,4 +1,4 @@
-# frozen_string_literal: true
+# frozen_string_literal: false
 
 DEBUG = false
 
@@ -28,6 +28,7 @@ DEBUG = false
 # Silver       44     590    24.29
 # Gold        342     426    18.35
 # Gold        376     429    17.08
+# Gold        330     453    18.70
 
 STDOUT.sync = true # DO NOT REMOVE
 # Deliver more ore to hq (left side of the map) than your opponent. Use radars to find ore but beware of traps!
@@ -143,7 +144,7 @@ class ScanSectorTask < Task
   end
 
   def next_command
-    target = @gs.nearest_ore(@bot)&.pos || @rand_target
+    target = @gs.nearest_ore(@bot)&.pos || @gs.radar_bot&.pos # @rand_target
     return finish_by { wait } if target.nil?
 
     if @bot.can_dig? target
@@ -236,6 +237,17 @@ class PlaceTrapTask < Task
   end
 end
 
+class SuicideTask < Task
+  def initialize(state, bot, target)
+    super state, bot
+    @target = target
+  end
+
+  def next_command
+    finish_by { dig_at @target }
+  end
+end
+
 class Cell
   attr_accessor :dangerous
   attr_reader :ore, :hole, :pos, :entities, :just_digged
@@ -283,6 +295,14 @@ class Cell
 
   def trap?
     @entities&.any?(&:trap?)
+  end
+
+  def robots?
+    return @entities&.any?(&:robot?) unless block_given?
+
+    @entities&.each do |ent|
+      yield ent if ent.robot?
+    end
   end
 
   def contains_item_type?(type)
@@ -396,10 +416,14 @@ class Entity
   def trap?
     false
   end
+
+  def robot?
+    false
+  end
 end
 
 class Robot < Entity
-  attr_reader :pos, :item
+  attr_reader :pos, :item, :owner
   attr_accessor :task
 
   def initialize(id, col, row, item_id, owner)
@@ -429,6 +453,10 @@ class Robot < Entity
     self
   end
 
+  def robot?
+    true
+  end
+
   def distance_to(pos)
     @pos.distance_to pos
   end
@@ -455,6 +483,10 @@ class Robot < Entity
 
   def carrying?(item = nil)
     item.nil? ? @item != :none : @item == item
+  end
+
+  def carrying_ore?
+    @item == :ore
   end
 
   def can_dig?(pos)
@@ -676,10 +708,40 @@ class GameState
     @my_bots.find { |bot| bot.task.is_a? PlaceRadarTask }
   end
 
+  def trap_kills(pos, kills = { player: [], opponent: [] }, visited = {})
+    @board.each_neighbour(pos) do |cell|
+      next if visited[cell.pos]
+
+      visited[cell.pos] = true
+      cell.robots? { |bot| kills[bot.owner] << bot if bot.enabled? }
+      kills = trap_kills(cell.pos, kills, visited) if cell.trap?
+    end
+    kills
+  end
+
+  def kamikazes
+    bots = {}
+    @items.each do |_, item|
+      next unless item.is_a? Trap
+
+      kills = trap_kills(item.pos)
+      plys = kills[:player]
+      opos = kills[:opponent]
+      bots[plys.first.id] = item.pos if plys.size == 1 && opos.size >= 1 && plys.none?(&:carrying_ore?)
+    end
+    bots
+  end
+
   def assign_tasks
     radar_avail = can_place_radar? && !radar_bot
     trap_avail = trap_available?
+    kamis = kamikazes
     @my_bots.each do |bot|
+      if kamis[bot.id]
+        bot.task = SuicideTask.new(self, bot, kamis[bot.id])
+        next
+      end
+
       next unless bot.finished_task?
 
       if bot.enabled?
@@ -722,7 +784,15 @@ class GameState
   end
 
   def to_s
-    @board.to_s
+    # @board.to_s
+    s = ''
+    @items.each do |_, item|
+      if item.is_a? Trap
+        kills = trap_kills(item.pos)
+        s << "#{item.pos} => #{kills}" if kills[:player].size == 1 && kills[:opponent].size.positive?
+      end
+    end
+    s
   end
 end
 
@@ -731,6 +801,6 @@ gs = GameState.new
 
 loop do
   gs.read_state
-  # warn gs if DEBUG
+  warn gs if DEBUG
   puts gs.moves
 end
