@@ -1,6 +1,6 @@
 # frozen_string_literal: false
 
-DEBUG = false
+DEBUG = true
 
 # Rank    Position  Total   Global  Points
 # Bronze      981   1,127            13.51
@@ -68,6 +68,10 @@ class Position
     Math.sqrt((row - pos.row).sqr + (col - pos.col).sqr)
   end
 
+  def manhattan_to(pos)
+    (row - pos.row).abs + (col - pos.col).abs
+  end
+
   def self.random
     Position.new(rand(HEIGHT), rand(WIDTH))
   end
@@ -94,12 +98,13 @@ class Task
   end
 
   def move_to_hq
-    move_to @bot.hq
+    move_to @gs.map_safe_target(@bot.pos, @bot.hq)
+    # move_to @bot.hq
   end
 
   def dig_at(target)
     yield if block_given?
-    @gs.dig_at target, msg: self.class
+    @gs.dig_at target, @bot, msg: self.class
   end
 
   def request(item)
@@ -202,15 +207,18 @@ end
 class DeliverOreTask < Task
   def initialize(state, bot)
     super state, bot
+    @fake_bomb = true
   end
 
   def next_command
     # warn "bot: #{@bot}, target: #{@target}"
+    return wait.tap { @fake_bomb = false } if @bot.at_hq? && @fake_bomb
+
     move_to_hq
   end
 
   def finished?
-    super || @bot.at_hq?
+    super || @bot.at_hq? && !@fake_bomb
   end
 end
 
@@ -633,9 +641,12 @@ class GameState
     Command.new(:MOVE, pos: target, msg: msg)
   end
 
-  def dig_at(target, msg: nil)
-    @board[target].claim_hole
+  def dig_at(target, bot, msg: nil)
     @board.decrement_ore(target)
+    @board[target].tap do |cell|
+      cell.claim_hole
+      cell.dangerous = (bot.item == :trap)
+    end
     Command.new(:DIG, pos: target, msg: msg)
   end
 
@@ -699,6 +710,31 @@ class GameState
       !(cell.dangerous || cell.contains_item_type?(Radar))
     end
     # .tap { |loc| warn "Radar location: #{loc}" }
+  end
+
+  def safe?(pos)
+    @board.each_neighbour(pos) do |cell|
+      return false if cell.dangerous
+    end
+    true
+  end
+
+  def map_safe_target(from, target)
+    return target if from.manhattan_to(target) <= 4
+
+    tgt = target
+    dst = 999
+    (-4..4).each do |dcol|
+      range = 4 - dcol.abs
+      (-range..range).each do |drow|
+        pos = Position.new(from.row + drow, from.col + dcol)
+        if safe?(pos) && (d = pos.distance_to(target)) < dst
+          tgt = pos
+          dst = d
+        end
+      end
+    end
+    tgt
   end
 
   def can_place_radar?
