@@ -4,6 +4,8 @@
 
 This is the code I developed during the contest **Unleash the geek** on [Codingame](http://www.codingame.com/). I used Ruby mainly because currently, I'm still learning the language while participating in the [Microverse](http://www.microverse.org/) training program.
 
+#### [View Ruby leaderboard](https://www.codingame.com/leaderboards/contests/unleash-the-geek-amadeus/global?column=language&value=Ruby)
+
 ## Main points to consider :
 
 * All the design is separated in classes, being **GameState** the main class. 
