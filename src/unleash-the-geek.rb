@@ -776,7 +776,7 @@ class GameState
                    DeliverOreTask.new(self, bot)
                  elsif radar_avail && ore_dist > 4
                    PlaceRadarTask.new(self, bot).tap { radar_avail = false }
-                 elsif bot.at_hq? && trap_avail && nearest_ore(bot, min_size: 2) && ore_dist > 4
+                 elsif bot.at_hq? && trap_avail && rand(10) < 0 && nearest_ore(bot, min_size: 2) && ore_dist > 4
                    PlaceTrapTask.new(self, bot).tap { |tsk| @board.decrement_ore(tsk.target, clear: true); trap_avail = false }
                  elsif ore_cell
                    MineOreTask.new(self, bot)
