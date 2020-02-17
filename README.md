@@ -1,6 +1,6 @@
 # 🤓 Unleash the geek
 
-<img src="docs/gameplay.gif" align="right">
+[<img src="docs/gameplay.gif" align="right">](https://www.codingame.com/leaderboards/contests/unleash-the-geek-amadeus/global?column=language&value=Ruby)
 
 ### Codingame.com contest (4/Oct/2019)
 
