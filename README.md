@@ -2,9 +2,11 @@
 
 [<img src="docs/gameplay.gif" align="right">](https://www.codingame.com/leaderboards/contests/unleash-the-geek-amadeus/global?column=language&value=Ruby)
 
-### Codingame.com contest (4/Oct/2019)
+### Codingame.com contest - Oct 4 to14, 2019
 
-This is the code I developed during the contest **Unleash the geek** on [Codingame](http://www.codingame.com/). I used Ruby mainly because currently, I'm still learning the language while participating in the [Microverse](http://www.microverse.org/) training program.
+This is the code I developed during the contest [**Unleash the geek**](https://www.codingame.com/contests/unleash-the-geek-amadeus) at [Codingame](http://www.codingame.com/), during 10 days of coding. I used Ruby mainly because currently, I'm still learning the language while participating in the [Microverse](http://www.microverse.org/) training program.
+
+And yes, also because I like it. 😃
 
 ## 📈 [Ruby leaderboard](https://www.codingame.com/leaderboards/contests/unleash-the-geek-amadeus/global?column=language&value=Ruby)
 
@@ -14,8 +16,22 @@ Although the game is no longer available for playing, this code can be interesti
 
 If you have any questions about it, please feel free to drop me a line at [oscar@oscarnava.me](mailto:oscar@oscarnava.me).
 
-### Main points to consider :
+---
+## 🛠 Built with:
+- Ruby
+- ☕ Coffee of course!
 
+## 👤 Contributors
+
+- [Oscar Nava](https://github.com/oscarnava) 📧 contact@oscarnava.me
+
+## 🗝 License
+Creative Commons [Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
+
+---
+## 👨‍🏫 Main points to consider:
+
+* Because of the nature of the platform, all code is concentrated in one single file; not ideal, but required.
 * All the design is separated in classes, being **GameState** the main class.
 * Only one instance of **GameState** exists, and each turn it's updated and asked for the next moves.
 * Entities like *Robots*, *Traps*, and *Radars* all derive from the parent class **Entity**, and robot strategies derive from the class **Task**.
