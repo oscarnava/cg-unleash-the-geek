@@ -96,3 +96,7 @@ A trap buried inside a hole will go off if any robot uses the DIG command on the
 A radar buried inside a hole will grant the ability to see the amount of buried ore in veins within a range of 4 cells, for the team which buried it. If an opponent robot uses the DIG on the cell the radar is buried in, the radar is destroyed.
 
 You can check out the source code of this game on [this GitHub repo](https://github.com/CodinGameCommunity/UnleashTheGeek).
+
+## 📡 Contact
+
+Please don't hesitate to contact me at 📧 [contact@oscarnava.me](mailto:contact@oscarnava.me) if you have any questions, comments, etc. I would love to know what's on your mind!
